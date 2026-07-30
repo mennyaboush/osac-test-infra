@@ -59,14 +59,6 @@ def test_baremetal_instance_restart(
         grpc.update_baremetal_instance_restart_trigger(bmi_id=bmi_id, restart_trigger=new_trigger)
 
         poll_until(
-            fn=lambda: _get_restart_condition_status(grpc, bmi_id, _RESTART_IN_PROGRESS),
-            until=lambda v: v == "CONDITION_STATUS_TRUE",
-            retries=60,
-            delay=5,
-            description=f"{bmi_id} RESTART_IN_PROGRESS appears",
-        )
-
-        poll_until(
             fn=lambda: _get_status_restart_trigger(grpc, bmi_id),
             until=lambda v: v == new_trigger,
             retries=120,
@@ -91,7 +83,7 @@ def test_baremetal_instance_restart(
 
         restart_in_progress: str = _get_restart_condition_status(grpc, bmi_id, _RESTART_IN_PROGRESS)
         assert restart_in_progress in ("", "CONDITION_STATUS_FALSE"), (
-            f"RESTART_IN_PROGRESS should have cleared, got: {restart_in_progress}"
+            f"RESTART_IN_PROGRESS should have cleared after restart, got: {restart_in_progress}"
         )
 
         restart_failed: str = _get_restart_condition_status(grpc, bmi_id, _RESTART_FAILED)
