@@ -102,5 +102,5 @@ def test_baremetal_instance_restart(
                 wait_for_bmi_deletion(k8s=k8s_hub_client, name=bmi_cr)
                 wait_for_bmi_grpc_removal(grpc=grpc, uuid=bmi_id)
             except Exception:
-                logger.exception("Best-effort cleanup of BMI %s failed", bmi_id)
+                logger.exception("Failed to delete BMI %s during cleanup", bmi_id)
         raise
