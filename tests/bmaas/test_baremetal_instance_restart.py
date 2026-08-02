@@ -7,9 +7,29 @@ from tests.core.grpc_client import GRPCClient
 from tests.core.helpers import wait_for_bmi_cr, wait_for_bmi_deletion, wait_for_bmi_grpc_removal, wait_for_bmi_running
 from tests.core.k8s_client import K8sClient
 from tests.core.osac_cli import OsacCLI
-from tests.core.runner import poll_until
+from tests.core.runner import poll_until, run_unchecked
 
 logger = logging.getLogger(__name__)
+
+
+def _log_bmh_inventory(bmh_namespace: str) -> None:
+    output, rc = run_unchecked(
+        "kubectl",
+        "--as",
+        "system:admin",
+        "get",
+        "baremetalhost",
+        "-n",
+        bmh_namespace,
+        "-o",
+        "custom-columns=NAME:.metadata.name,STATE:.status.provisioning.state,"
+        "ONLINE:.spec.online,POWERED:.status.poweredOn,CONSUMER:.spec.consumerRef.name",
+    )
+    if rc == 0:
+        logger.info("BMH inventory in %s:\n%s", bmh_namespace, output)
+    else:
+        logger.warning("Failed to list BMHs in %s: rc=%d, output=%s", bmh_namespace, rc, output)
+
 
 _RESTART_IN_PROGRESS: str = "BARE_METAL_INSTANCE_CONDITION_TYPE_RESTART_IN_PROGRESS"
 _RESTART_FAILED: str = "BARE_METAL_INSTANCE_CONDITION_TYPE_RESTART_FAILED"
@@ -39,15 +59,24 @@ def test_baremetal_instance_restart(
     ssh_public_key: str,
 ) -> None:
     name: str = f"e2e-bmi-restart-{test_run_id}"
+
+    _log_bmh_inventory(bmh_namespace)
+
     bmi_id: str = cli.create_baremetal_instance(name=name, catalog_item=catalog_item, ssh_key=ssh_public_key)
+    logger.info("Created BMI %s (id=%s), waiting for CR and Running state", name, bmi_id)
 
     try:
         assert bmi_id in grpc.list_baremetal_instance_ids()
 
         bmi_cr_name: str = wait_for_bmi_cr(k8s=k8s_hub_client, uuid=bmi_id)
-        wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
+        logger.info("BMI CR appeared: %s", bmi_cr_name)
 
         external_host_id: str = k8s_hub_client.get_baremetal_instance_external_host_id(name=bmi_cr_name)
+        logger.info("BMI %s assigned to BMH: %s", bmi_id, external_host_id)
+        _log_bmh_inventory(bmh_namespace)
+
+        wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
+
         assert "/" in external_host_id, f"Expected namespace/name format, got: {external_host_id}"
         bmh_ns, bmh_name = external_host_id.split("/", 1)
         assert bmh_ns == bmh_namespace, f"BMH landed in {bmh_ns}, expected {bmh_namespace}"
