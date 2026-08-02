@@ -102,11 +102,11 @@ def test_baremetal_instance_restart(
         bmi_cr_name: str = wait_for_bmi_cr(k8s=k8s_hub_client, uuid=bmi_id)
         logger.info("BMI CR appeared: %s", bmi_cr_name)
 
+        wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
+
         external_host_id: str = k8s_hub_client.get_baremetal_instance_external_host_id(name=bmi_cr_name)
         logger.info("BMI %s assigned to BMH: %s", bmi_id, external_host_id)
         log_bmh_inventory(bmh_namespace)
-
-        wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
 
         assert "/" in external_host_id, f"Expected namespace/name format, got: {external_host_id}"
         bmh_ns, bmh_name = external_host_id.split("/", 1)
