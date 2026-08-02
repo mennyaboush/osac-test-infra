@@ -107,6 +107,24 @@ def test_baremetal_instance_lifecycle(
             description=f"{bmh_name} powered on",
         )
 
+        # Log state after power-on to compare with restart test
+        _log_bmh_inventory(bmh_namespace)
+        gRPC_state: str = grpc.get_baremetal_instance_state(bmi_id=bmi_id)
+        cr_phase, _ = run_unchecked(
+            "kubectl",
+            "--as",
+            "system:admin",
+            "get",
+            "baremetalinstance",
+            bmi_cr_name,
+            "-n",
+            k8s_hub_client.namespace,
+            "-o",
+            'jsonpath={.status.phase}|PowerSynced={.status.conditions[?(@.type=="PowerSynced")].status}'
+            '/{.status.conditions[?(@.type=="PowerSynced")].reason}',
+        )
+        logger.info("After power-on: gRPC_state=%s, CR=%s", gRPC_state, cr_phase)
+
         # Deprovision
         cli.delete_baremetal_instance(uuid=bmi_id)
         wait_for_bmi_deletion(k8s=k8s_hub_client, name=bmi_cr_name)
