@@ -35,6 +35,55 @@ _RESTART_IN_PROGRESS: str = "BARE_METAL_INSTANCE_CONDITION_TYPE_RESTART_IN_PROGR
 _RESTART_FAILED: str = "BARE_METAL_INSTANCE_CONDITION_TYPE_RESTART_FAILED"
 
 
+def _log_full_state(grpc: GRPCClient, k8s: K8sClient, bmi_id: str, bmh_name: str, bmh_ns: str) -> None:
+    try:
+        bmi_resp: dict[str, Any] = grpc.get_baremetal_instance(bmi_id=bmi_id)
+        bmi_status: dict[str, Any] = bmi_resp.get("object", {}).get("status", {})
+        logger.info(
+            "BMI gRPC state=%s, conditions=%s, restartTrigger(spec=%s, status=%s)",
+            bmi_status.get("state", "?"),
+            [
+                (c.get("type", "?").removeprefix("BARE_METAL_INSTANCE_CONDITION_TYPE_"), c.get("status", "?"))
+                for c in bmi_status.get("conditions", [])
+            ],
+            bmi_resp.get("object", {}).get("spec", {}).get("restartTrigger", "?"),
+            bmi_status.get("restartTrigger", "?"),
+        )
+    except Exception:
+        logger.exception("Failed to get BMI gRPC state for %s", bmi_id)
+
+    bmh_state, _ = run_unchecked(
+        "kubectl",
+        "--as",
+        "system:admin",
+        "get",
+        "baremetalhost",
+        bmh_name,
+        "-n",
+        bmh_ns,
+        "-o",
+        "jsonpath={.status.provisioning.state}|{.spec.online}|{.status.poweredOn}"
+        "|{.status.errorMessage}|{.status.errorType}",
+    )
+    logger.info("BMH %s: %s", bmh_name, bmh_state)
+
+    bmi_cr_name: str = k8s.get_baremetal_instance_name(uuid=bmi_id, checked=False)
+    if bmi_cr_name:
+        cr_state, _ = run_unchecked(
+            "kubectl",
+            "--as",
+            "system:admin",
+            "get",
+            "baremetalinstance",
+            bmi_cr_name,
+            "-n",
+            k8s.namespace,
+            "-o",
+            "jsonpath={.status.phase}|{.status.conditions[*].type}|{.status.conditions[*].status}",
+        )
+        logger.info("BMI CR %s: %s", bmi_cr_name, cr_state)
+
+
 def _get_restart_condition_status(grpc: GRPCClient, bmi_id: str, condition_type: str) -> str:
     response: dict[str, Any] = grpc.get_baremetal_instance(bmi_id=bmi_id)
     conditions: list[dict[str, Any]] = response.get("object", {}).get("status", {}).get("conditions", [])
@@ -111,7 +160,19 @@ def test_baremetal_instance_restart(
             description=f"{bmh_name} powered on after restart",
         )
 
-        wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
+        def _check_running_with_diagnostics() -> str:
+            state: str = grpc.get_baremetal_instance_state(bmi_id=bmi_id)
+            if state != "BARE_METAL_INSTANCE_STATE_RUNNING":
+                _log_full_state(grpc, k8s_hub_client, bmi_id, bmh_name, bmh_ns)
+            return state
+
+        poll_until(
+            fn=_check_running_with_diagnostics,
+            until=lambda v: v == "BARE_METAL_INSTANCE_STATE_RUNNING",
+            retries=120,
+            delay=10,
+            description=f"{bmi_id} RUNNING after restart",
+        )
 
         final_trigger: int = _get_status_restart_trigger(grpc, bmi_id)
         assert final_trigger == new_trigger, (
