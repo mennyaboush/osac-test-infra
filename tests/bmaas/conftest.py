@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 import uuid
@@ -9,7 +10,28 @@ from pathlib import Path
 import pytest
 
 from tests.core.grpc_client import GRPCClient
-from tests.core.runner import env
+from tests.core.runner import env, run_unchecked
+
+logger = logging.getLogger(__name__)
+
+
+def log_bmh_inventory(bmh_namespace: str) -> None:
+    output, rc = run_unchecked(
+        "kubectl",
+        "--as",
+        "system:admin",
+        "get",
+        "baremetalhost",
+        "-n",
+        bmh_namespace,
+        "-o",
+        "custom-columns=NAME:.metadata.name,STATE:.status.provisioning.state,"
+        "ONLINE:.spec.online,POWERED:.status.poweredOn,CONSUMER:.spec.consumerRef.name",
+    )
+    if rc == 0:
+        logger.info("BMH inventory in %s:\n%s", bmh_namespace, output)
+    else:
+        logger.warning("Failed to list BMHs in %s: rc=%d, output=%s", bmh_namespace, rc, output)
 
 
 @pytest.fixture(scope="session")

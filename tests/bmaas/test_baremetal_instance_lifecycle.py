@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from tests.bmaas.conftest import log_bmh_inventory
 from tests.core.grpc_client import GRPCClient
 from tests.core.helpers import (
     wait_for_bmh_available,
@@ -13,28 +14,9 @@ from tests.core.helpers import (
 )
 from tests.core.k8s_client import K8sClient
 from tests.core.osac_cli import OsacCLI
-from tests.core.runner import poll_until, run_unchecked
+from tests.core.runner import poll_until
 
 logger = logging.getLogger(__name__)
-
-
-def _log_bmh_inventory(bmh_namespace: str) -> None:
-    output, rc = run_unchecked(
-        "kubectl",
-        "--as",
-        "system:admin",
-        "get",
-        "baremetalhost",
-        "-n",
-        bmh_namespace,
-        "-o",
-        "custom-columns=NAME:.metadata.name,STATE:.status.provisioning.state,"
-        "ONLINE:.spec.online,POWERED:.status.poweredOn,CONSUMER:.spec.consumerRef.name",
-    )
-    if rc == 0:
-        logger.info("BMH inventory in %s:\n%s", bmh_namespace, output)
-    else:
-        logger.warning("Failed to list BMHs in %s: rc=%d, output=%s", bmh_namespace, rc, output)
 
 
 def test_baremetal_instance_lifecycle(
@@ -48,7 +30,7 @@ def test_baremetal_instance_lifecycle(
 ) -> None:
     name = f"e2e-bmi-{test_run_id}"
 
-    _log_bmh_inventory(bmh_namespace)
+    log_bmh_inventory(bmh_namespace)
 
     bmi_id: str = cli.create_baremetal_instance(name=name, catalog_item=catalog_item, ssh_key=ssh_public_key)
     logger.info("Created BMI %s (id=%s), waiting for CR and Running state", name, bmi_id)
@@ -61,7 +43,7 @@ def test_baremetal_instance_lifecycle(
 
         external_host_id: str = k8s_hub_client.get_baremetal_instance_external_host_id(name=bmi_cr_name)
         logger.info("BMI %s assigned to BMH: %s", bmi_id, external_host_id)
-        _log_bmh_inventory(bmh_namespace)
+        log_bmh_inventory(bmh_namespace)
 
         wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
 
@@ -107,23 +89,9 @@ def test_baremetal_instance_lifecycle(
             description=f"{bmh_name} powered on",
         )
 
-        # Log state after power-on to compare with restart test
-        _log_bmh_inventory(bmh_namespace)
-        gRPC_state: str = grpc.get_baremetal_instance_state(bmi_id=bmi_id)
-        cr_phase, _ = run_unchecked(
-            "kubectl",
-            "--as",
-            "system:admin",
-            "get",
-            "baremetalinstance",
-            bmi_cr_name,
-            "-n",
-            k8s_hub_client.namespace,
-            "-o",
-            'jsonpath={.status.phase}|PowerSynced={.status.conditions[?(@.type=="PowerSynced")].status}'
-            '/{.status.conditions[?(@.type=="PowerSynced")].reason}',
-        )
-        logger.info("After power-on: gRPC_state=%s, CR=%s", gRPC_state, cr_phase)
+        # Verify BMI returns to RUNNING after power-on
+        logger.info("Power-on complete — verifying BMI returns to RUNNING")
+        wait_for_bmi_running(grpc=grpc, bmi_id=bmi_id)
 
         # Deprovision
         cli.delete_baremetal_instance(uuid=bmi_id)
@@ -145,5 +113,5 @@ def test_baremetal_instance_lifecycle(
                 wait_for_bmi_deletion(k8s=k8s_hub_client, name=bmi_cr)
                 wait_for_bmi_grpc_removal(grpc=grpc, uuid=bmi_id)
             except Exception:
-                pass
+                logger.exception("Failed to delete BMI %s during cleanup", bmi_id)
         raise
