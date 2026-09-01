@@ -1,17 +1,23 @@
 REPORTS_DIR ?= reports
 
-.PHONY: test lint format test-vmaas test-caas test-storage test-bmaas test-metering test-references
+.PHONY: test lint format test-vmaas test-caas test-storage test-bmaas test-metering test-references \
+        test-bcm-simulator
 
 test:
 	mkdir -p $(REPORTS_DIR)
 	pytest tests/ -v $(if $(TEST),-k "$(TEST)") --junitxml=$(REPORTS_DIR)/results.xml
 
 lint:
-	ruff check tests/
-	ruff format --check tests/
+	ruff check tests/ bcm-simulator/
+	ruff format --check tests/ bcm-simulator/
 
 format:
-	ruff format tests/
+	ruff format tests/ bcm-simulator/
+
+# Unit tests for the BCM simulator (OSAC-3773). Self-contained — no cluster needed.
+test-bcm-simulator:
+	mkdir -p $(REPORTS_DIR)
+	pytest bcm-simulator/ -v $(if $(TEST),-k "$(TEST)") --junitxml=$(REPORTS_DIR)/bcm-simulator.xml
 
 test-vmaas:
 	mkdir -p $(REPORTS_DIR)

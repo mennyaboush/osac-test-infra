@@ -1,0 +1,23 @@
+{
+  "cm_version": "11.0",
+  "lite_nodes": [
+    {
+      "hostname": "gpu-node-001",
+      "resource_class": "gpu-node",
+      "mac": "aa:bb:cc:dd:ee:01",
+      "bmc_address": "ipmi://10.0.0.1"
+    },
+    {
+      "hostname": "gpu-node-002",
+      "resource_class": "gpu-node",
+      "mac": "aa:bb:cc:dd:ee:02",
+      "bmc_address": "ipmi://10.0.0.2"
+    },
+    {
+      "hostname": "default-node-001",
+      "resource_class": "default",
+      "mac": "aa:bb:cc:dd:ee:03",
+      "bmc_address": "ipmi://10.0.0.3"
+    }
+  ]
+}
