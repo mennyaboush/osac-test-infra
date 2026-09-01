@@ -1,0 +1,41 @@
+# BCM simulator container (OSAC-3773).
+#
+# A stdlib-only Python HTTP/TLS server — no third-party runtime dependencies, so
+# there is nothing to pip-install. Built on the Red Hat UBI9 python-311 image,
+# which already ships Python 3.11 and runs as non-root user 1001.
+#
+# Build (from this directory):
+#   podman build -t bcm-simulator:latest -f Containerfile .
+# Run (plain HTTP, default two free LiteNodes):
+#   podman run --rm -p 8443:8443 bcm-simulator:latest
+# Run (HTTPS + a seeded scenario, configured via env):
+#   podman run --rm -p 8443:8443 \
+#     -e BCM_SIM_SCENARIO=/etc/bcm-simulator/scenario.json \
+#     -e BCM_SIM_TLS_CERT=/etc/bcm-simulator/tls/server.pem \
+#     -e BCM_SIM_TLS_KEY=/etc/bcm-simulator/tls/server.key \
+#     -v ./scenarios/default.json:/etc/bcm-simulator/scenario.json:ro \
+#     -v ./tls:/etc/bcm-simulator/tls:ro \
+#     bcm-simulator:latest
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+LABEL org.opencontainers.image.title="OSAC BCM Simulator" \
+      org.opencontainers.image.description="Fake NVIDIA Base Command Manager JSON API for OSAC BMaaS E2E tests" \
+      org.opencontainers.image.source="https://github.com/osac-project/osac-test-infra"
+
+WORKDIR /app
+
+# The package and its bundled scenarios are all that is needed at runtime.
+COPY bcm_simulator/ ./bcm_simulator/
+COPY scenarios/ ./scenarios/
+
+# Data plane. The Deployment/Service targets this port.
+EXPOSE 8443
+
+# Liveness/readiness: the admin control plane's /_admin/healthz. Uses stdlib
+# urllib so no extra tooling (curl) is needed in the image.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8443/_admin/healthz', timeout=2).status==200 else 1)"
+
+# Configure via BCM_SIM_* env vars (see bcm_simulator/__main__.py). Override the
+# command's args in the Deployment if you prefer explicit flags.
+ENTRYPOINT ["python", "-m", "bcm_simulator"]

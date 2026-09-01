@@ -1,7 +1,9 @@
 REPORTS_DIR ?= reports
 
 .PHONY: test lint format test-vmaas test-caas test-storage test-bmaas test-metering test-references \
-        test-bcm-simulator
+        test-bcm-simulator bcm-simulator-image
+
+BCM_SIMULATOR_IMAGE ?= bcm-simulator:latest
 
 test:
 	mkdir -p $(REPORTS_DIR)
@@ -18,6 +20,10 @@ format:
 test-bcm-simulator:
 	mkdir -p $(REPORTS_DIR)
 	pytest bcm-simulator/ -v $(if $(TEST),-k "$(TEST)") --junitxml=$(REPORTS_DIR)/bcm-simulator.xml
+
+# Build the BCM simulator container image (override registry/tag via BCM_SIMULATOR_IMAGE).
+bcm-simulator-image:
+	podman build -t $(BCM_SIMULATOR_IMAGE) -f bcm-simulator/Containerfile bcm-simulator/
 
 test-vmaas:
 	mkdir -p $(REPORTS_DIR)

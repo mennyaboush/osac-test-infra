@@ -1,0 +1,11 @@
+.git
+tests/
+conftest.py
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+README.md
+tls/
+*.pem
+*.key

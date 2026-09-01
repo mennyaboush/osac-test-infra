@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from .scenarios import Scenario, build_default_scenario, load_scenario
@@ -18,13 +19,18 @@ from .server import make_server
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    # Every flag falls back to a BCM_SIM_* env var, so the container image can be
+    # configured via a Deployment's env without overriding its command/args.
     parser = argparse.ArgumentParser(prog="bcm_simulator", description="Fake NVIDIA BCM JSON API for OSAC E2E tests")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8443, help="Bind port (default: 8443)")
-    parser.add_argument("--scenario", default=None, help="Path to a scenario JSON file (default: two free LiteNodes)")
-    parser.add_argument("--tls-cert", default=None, help="Server TLS cert (PEM). Omit for plain HTTP.")
-    parser.add_argument("--tls-key", default=None, help="Server TLS private key (PEM). Omit for plain HTTP.")
-    parser.add_argument("--log-level", default="INFO", help="Logging level (default: INFO)")
+    parser.add_argument("--host", default=os.getenv("BCM_SIM_HOST", "0.0.0.0"), help="Bind address")
+    parser.add_argument("--port", type=int, default=int(os.getenv("BCM_SIM_PORT", "8443")), help="Bind port")
+    parser.add_argument(
+        "--scenario", default=os.getenv("BCM_SIM_SCENARIO"), help="Scenario JSON file (default: two free LiteNodes)"
+    )
+    # cert+key both unset -> plain HTTP (test mode); both set -> HTTPS.
+    parser.add_argument("--tls-cert", default=os.getenv("BCM_SIM_TLS_CERT"), help="Server TLS cert (PEM)")
+    parser.add_argument("--tls-key", default=os.getenv("BCM_SIM_TLS_KEY"), help="Server TLS key (PEM)")
+    parser.add_argument("--log-level", default=os.getenv("BCM_SIM_LOG_LEVEL", "INFO"), help="Logging level")
     return parser.parse_args(argv)
 
 

@@ -63,6 +63,45 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout server.key -out server.pem \
     -days 365 -subj "/CN=bcm-simulator"
 ```
 
+## Container
+
+The simulator ships as a container image (stdlib-only, so nothing to
+pip-install), built on UBI9 `python-311` and running as non-root user 1001.
+
+```bash
+make bcm-simulator-image                        # from the repo root
+# or: podman build -t bcm-simulator:latest -f bcm-simulator/Containerfile bcm-simulator/
+
+# Plain HTTP with the default two free LiteNodes:
+podman run --rm -p 8443:8443 bcm-simulator:latest
+
+# HTTPS + a seeded scenario, configured entirely via env:
+podman run --rm -p 8443:8443 \
+    -e BCM_SIM_SCENARIO=/etc/bcm-simulator/scenario.json \
+    -e BCM_SIM_TLS_CERT=/etc/bcm-simulator/tls/server.pem \
+    -e BCM_SIM_TLS_KEY=/etc/bcm-simulator/tls/server.key \
+    -v ./scenarios/default.json:/etc/bcm-simulator/scenario.json:ro \
+    -v ./tls:/etc/bcm-simulator/tls:ro \
+    bcm-simulator:latest
+```
+
+Every CLI flag has a `BCM_SIM_*` env equivalent, so a Kubernetes Deployment can
+configure the image without overriding its command:
+
+| Env var | Flag | Default |
+|---------|------|---------|
+| `BCM_SIM_HOST` | `--host` | `0.0.0.0` |
+| `BCM_SIM_PORT` | `--port` | `8443` |
+| `BCM_SIM_SCENARIO` | `--scenario` | *(built-in default: two free LiteNodes)* |
+| `BCM_SIM_TLS_CERT` | `--tls-cert` | *(unset → plain HTTP)* |
+| `BCM_SIM_TLS_KEY` | `--tls-key` | *(unset → plain HTTP)* |
+| `BCM_SIM_LOG_LEVEL` | `--log-level` | `INFO` |
+
+The image declares a `HEALTHCHECK` against `/_admin/healthz` (stdlib `urllib`,
+no `curl` needed) — the same endpoint a Deployment readiness probe should use.
+Wiring the image into the kind/E2E cluster and the operator's `type: bcm`
+inventory config is PR 3 (E2E infrastructure).
+
 ## Scenario files
 
 A scenario is JSON. Use `lite_nodes` for the common free-host case; use
