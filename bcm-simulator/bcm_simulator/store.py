@@ -14,16 +14,13 @@ import copy
 import threading
 from typing import Any
 
-# Default device-level BMC credentials seeded onto a LiteNode. Matches the Go
-# mock's addLiteNode. Post OSAC-3768 the operator sources BMC credentials from
-# bmcSettings (device -> category -> partition inheritance), NOT from
-# extra_values.osac_bmc_credentials_secret.
-_DEFAULT_BMC_SETTINGS: dict[str, Any] = {
-    "baseType": "BMCSettings",
-    "userName": "root",
-    "password": "calvin",
-    "userID": 2,
-}
+# Default device-level BMC credentials seeded onto a LiteNode. Post OSAC-3768 the
+# operator sources BMC credentials from bmcSettings (device -> category ->
+# partition inheritance), NOT from extra_values.osac_bmc_credentials_secret.
+# Fields mirror the real BCM device object (see osac-1339/reference/deep-dive.md):
+# userName/password/userID only — real bmcSettings carries no nested baseType, and
+# the operator's client ignores unknown fields anyway (bcmclient/types.go BMCSettings).
+_DEFAULT_BMC_SETTINGS: dict[str, Any] = {"userName": "root", "password": "calvin", "userID": 2}
 
 
 class DeviceStore:
