@@ -846,6 +846,7 @@ jobs:
             -e OSAC_BMI_TEMPLATE="${OSAC_BMI_TEMPLATE}" \
             -e OSAC_BMH_NAMESPACE="${OSAC_BMH_NAMESPACE}" \
             -e OSAC_PULL_SECRET_PATH=/root/pull-secret \
+            -e BCM_SIMULATOR_URL="${BCM_SIMULATOR_URL:-}" \
             "${E2E_IMAGE}" \
             pytest "${TEST_ARGS[@]}" "${FILTER_ARGS[@]}" "${MARKER_ARGS[@]}" \
               ${XDIST_ARGS} \
