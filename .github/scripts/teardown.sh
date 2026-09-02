@@ -149,9 +149,30 @@ if [[ -d "${SUSHY_CONFIG_DIR}" ]]; then
   rm -rf "${SUSHY_CONFIG_DIR}"
 fi
 
+# --- Clean up BCM simulator resources (BCM backend only) ---
+# All names derived from CLONE_NAME; must match setup-bcm-simulator.sh. When the
+# run used the Metal3 backend these simply don't exist and the removals are no-ops.
+BCM_SIM_CONTAINER="bcm-simulator-${CLONE_NAME}"
+BCM_SIM_IMAGE="bcm-simulator:e2e-${CLONE_NAME}"
+BCM_SIM_WORK_DIR="${HOME}/bcm-sim-${CLONE_NAME}"
+BCM_VM_INVENTORY="${HOME}/bcm-vm-inventory-${CLONE_NAME}.json"
+if command -v podman &>/dev/null; then
+  if podman container exists "${BCM_SIM_CONTAINER}" 2>/dev/null; then
+    echo "Removing BCM simulator container '${BCM_SIM_CONTAINER}'..."
+    podman rm -f "${BCM_SIM_CONTAINER}" 2>/dev/null || true
+  fi
+  podman rmi -f "${BCM_SIM_IMAGE}" 2>/dev/null || true
+fi
+rm -rf "${BCM_SIM_WORK_DIR}"
+rm -f "${BCM_VM_INVENTORY}"
+
 # --- Verify BMaaS cleanup ---
 # Fail the job if critical resources leaked so we're notified early.
 BMH_LEAKED=false
+if command -v podman &>/dev/null && podman container exists "${BCM_SIM_CONTAINER}" 2>/dev/null; then
+  echo "ERROR: BCM simulator container '${BCM_SIM_CONTAINER}' still present after cleanup" >&2
+  BMH_LEAKED=true
+fi
 REMAINING_VMS=$(${VIRSH} list --all --name 2>/dev/null | grep "^${BMH_VM_PREFIX}" || true)
 if [[ -n "${REMAINING_VMS}" ]]; then
   echo "ERROR: VMs still present after cleanup:" >&2

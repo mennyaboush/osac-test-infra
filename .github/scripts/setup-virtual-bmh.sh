@@ -14,6 +14,16 @@
 #   BMH_NAMESPACE  — namespace for BMH resources (default: host-inventory)
 #   BMH_COUNT      — number of virtual BMHs to create (default: 2)
 #   SUSHY_PORT     — sushy-tools listen port (default: 8000)
+#   CREATE_BMH     — create BareMetalHost CRs for the VMs (default: true).
+#                    Set to "false" for the BCM backend, where the operator
+#                    creates the BMHs itself from BCM inventory — this script
+#                    then only provides the sushy/libvirt/Ironic fabric and
+#                    writes the VM inventory (see VM_INVENTORY_FILE) for the
+#                    BCM simulator to point its LiteNodes at. With the default
+#                    (true) the existing Metal3 behavior is unchanged.
+#   VM_INVENTORY_FILE — path to write the VM inventory JSON to (default:
+#                    ${HOME}/bcm-vm-inventory-${CLONE_NAME}.json). Always written;
+#                    the Metal3 path simply ignores it.
 #
 # Teardown derives all paths from CLONE_NAME — no GITHUB_ENV exports needed.
 set -euo pipefail
@@ -24,6 +34,8 @@ set -euo pipefail
 BMH_NAMESPACE="${BMH_NAMESPACE:-host-inventory}"
 BMH_COUNT="${BMH_COUNT:-2}"
 SUSHY_PORT="${SUSHY_PORT:-8000}"
+CREATE_BMH="${CREATE_BMH:-true}"
+VM_INVENTORY_FILE="${VM_INVENTORY_FILE:-${HOME}/bcm-vm-inventory-${CLONE_NAME}.json}"
 SUSHY_CONFIG_DIR="${HOME}/sushy-${CLONE_NAME}"
 SUSHY_PID_FILE="${SUSHY_CONFIG_DIR}/sushy.pid"
 CT_NETWORK="test-infra-net-${CLONE_NAME}"
@@ -213,6 +225,36 @@ echo "VMs created: ${VM_NAMES}"
 echo "Verifying sushy-tools connectivity..."
 curl -sf "http://${GW_IP}:${SUSHY_PORT}/redfish/v1/Systems/" > /dev/null \
   || { echo "ERROR: sushy-tools not responding at ${GW_IP}:${SUSHY_PORT}" >&2; exit 1; }
+
+# --- Export VM inventory (always; Metal3 path ignores it) ---
+# Records each VM's name, UUID, MAC, and the Redfish BMC address Ironic uses.
+# setup-bcm-simulator.sh reads this to seed BCM LiteNodes whose osac_bmc_address/
+# mac point at these same VMs, so operator-created BMHs land on real sushy hardware.
+echo "==> Writing VM inventory to ${VM_INVENTORY_FILE}..."
+{
+  echo "["
+  inv_first=true
+  inv_i=0
+  for VM_NAME in ${VM_NAMES}; do
+    inv_i=$((inv_i + 1))
+    MAC="52:54:00:bb:cc:$(printf '%02x' "${inv_i}")"
+    VM_UUID=$(${VIRSH} domuuid "${VM_NAME}")
+    [[ "${inv_first}" == "true" ]] && inv_first=false || echo ","
+    printf '  {"name": "%s", "uuid": "%s", "mac": "%s", "bmc_address": "redfish-virtualmedia+http://%s:%s/redfish/v1/Systems/%s"}' \
+      "${VM_NAME}" "${VM_UUID}" "${MAC}" "${GW_IP}" "${SUSHY_PORT}" "${VM_UUID}"
+  done
+  echo ""
+  echo "]"
+} > "${VM_INVENTORY_FILE}"
+echo "VM inventory written:"
+cat "${VM_INVENTORY_FILE}"
+
+if [[ "${CREATE_BMH}" != "true" ]]; then
+  echo "==> CREATE_BMH=${CREATE_BMH}: skipping BareMetalHost creation."
+  echo "    The BCM inventory backend will create BMHs from BCM LiteNodes."
+  echo "==> Virtual BMH fabric ready (sushy + ${BMH_COUNT} VMs); BMHs deferred to the operator."
+  exit 0
+fi
 
 echo "==> Waiting for the metal3 BareMetalHost webhook endpoint to be ready..."
 WEBHOOK_NS="openshift-machine-api"

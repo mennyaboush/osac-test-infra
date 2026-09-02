@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: "host-inventory"
+      inventory-backend:
+        description: "Inventory backend to configure: metal3 (default) or bcm. bcm deploys the BCM simulator and configures a type:bcm inventory pointing at it."
+        required: false
+        type: string
+        default: "metal3"
       flavor-image:
         description: "OCI image containing the cluster-tool flavor"
         required: false
@@ -341,11 +346,23 @@ jobs:
           sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/kubeconfig"
           chmod 600 "$RUNNER_TEMP/kubeconfig"
 
-      - name: Setup virtual BareMetalHosts
+      - name: Setup virtual BareMetalHosts (Metal3)
+        if: inputs.inventory-backend != 'bcm'
         env:
           KUBECONFIG: ${{ runner.temp }}/kubeconfig
           BMH_NAMESPACE: ${{ inputs.bmh-namespace }}
         run: bash .github/scripts/setup-virtual-bmh.sh
+
+      # BCM path: reuse the same sushy/libvirt/Ironic fabric (via setup-virtual-bmh.sh
+      # with CREATE_BMH=false — no BMHs, the operator creates them), then run the
+      # containerized BCM simulator on the runner host bound to the gateway IP.
+      # Exports BCM_SIMULATOR_URL to $GITHUB_ENV for the "Create BMF secrets" step.
+      - name: Setup BCM simulator
+        if: inputs.inventory-backend == 'bcm'
+        env:
+          KUBECONFIG: ${{ runner.temp }}/kubeconfig
+          BMH_NAMESPACE: ${{ inputs.bmh-namespace }}
+        run: bash .github/scripts/setup-bcm-simulator.sh
 
       # Loops over the `components` JSON array so any number of components
       # (one, two, or the 5-8 this repo is headed toward) can be built from
@@ -541,9 +558,62 @@ jobs:
           KUBECONFIG: ${{ runner.temp }}/kubeconfig
           INSTALLER_NAMESPACE: ${{ inputs.namespace }}
           BMH_NAMESPACE: ${{ inputs.bmh-namespace }}
+          INVENTORY_BACKEND: ${{ inputs.inventory-backend }}
         run: |
-          echo "Creating BMF operator secrets..."
+          echo "Creating BMF operator secrets (backend: ${INVENTORY_BACKEND})..."
           oc create namespace "${INSTALLER_NAMESPACE}" 2>/dev/null || true
+          if [[ "${INVENTORY_BACKEND}" == "bcm" ]]; then
+          : "${BCM_SIMULATOR_URL:?BCM_SIMULATOR_URL not set (setup-bcm-simulator.sh must run first)}"
+          echo "Configuring BCM inventory -> ${BCM_SIMULATOR_URL}"
+          # Dummy client cert/key: the operator's BCM client always offers a client
+          # cert (certwatcher), but the simulator does not enforce mTLS. The Secret
+          # keys must be tls.crt/tls.key (mounted at /etc/osac/certs/osac-bcm-certs);
+          # insecureSkipVerify skips verifying the simulator's self-signed server cert.
+          CERT_DIR="$(mktemp -d)"
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${CERT_DIR}/tls.key" -out "${CERT_DIR}/tls.crt" \
+            -days 3 -subj "/CN=osac-bcm-client" 2>/dev/null
+          oc create secret generic osac-bcm-certs -n "${INSTALLER_NAMESPACE}" \
+            --from-file=tls.crt="${CERT_DIR}/tls.crt" \
+            --from-file=tls.key="${CERT_DIR}/tls.key" \
+            --dry-run=client -o yaml | oc apply -f -
+          rm -rf "${CERT_DIR}"
+          # Inventory = BCM (points at the simulator); management stays Metal3
+          # because the BCM backend provisions through Metal3/Ironic.
+          oc apply -f - <<EOF
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: osac-inventory-config
+            namespace: ${INSTALLER_NAMESPACE}
+          type: Opaque
+          stringData:
+            inventory.yaml: |
+              name: bcm-inventory
+              type: bcm
+              hostClass: bcm
+              options:
+                bcm:
+                  url: ${BCM_SIMULATOR_URL}
+                  credentialsSecret: osac-bcm-certs
+                  insecureSkipVerify: true
+          ---
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: osac-management-config
+            namespace: ${INSTALLER_NAMESPACE}
+          type: Opaque
+          stringData:
+            management.yaml: |
+              name: metal3-management
+              type: metal3
+              options:
+                metal3:
+                  namespace: ${BMH_NAMESPACE}
+          EOF
+          else
           oc apply -f - <<EOF
           ---
           apiVersion: v1
@@ -576,6 +646,7 @@ jobs:
                 metal3:
                   namespace: ${BMH_NAMESPACE}
           EOF
+          fi
           echo "BMF secrets created."
 
       - name: Install OSAC
